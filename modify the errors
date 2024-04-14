@@ -1,0 +1,92 @@
+#include <SoftwareSerial.h>
+#include <TinyGPS++.h>
+#include <LiquidCrystal.h>
+#include <ISD1820.h>
+#include <DHT.h>
+#include <PulseSensor.h>
+
+SoftwareSerial gsmSerial(10, 11);  // RX, TX pins for SIM A7670C module
+SoftwareSerial gpsSerial(6, 7);    // RX, TX pins for GPS module
+TinyGPSPlus gps;
+LiquidCrystal lcd(12, 11, 5, 4, 3, 2);  // LCD pins: RS, EN, D4, D5, D6, D7
+ISD1820 isd1820(8, 13);  // ISD1820 pins: Play, REC
+DHT dht(14, DHT22);      // DHT22 sensor pin
+PulseSensor pulseSensor; // Pulse sensor object
+
+void setup() {
+  Serial.begin(9600);
+  gsmSerial.begin(9600);  // Set the baud rate for GSM communication
+  gpsSerial.begin(9600);  // Set the baud rate for GPS communication
+  lcd.begin(16, 2);
+  isd1820.stop();
+  dht.begin();
+  pulseSensor.begin();
+}
+
+void loop() {
+  // GPS Tracking
+  while (gpsSerial.available() > 0) {
+    if (gps.encode(gpsSerial.read())) {
+      if (gps.location.isValid()) {
+        lcd.clear();
+        lcd.setCursor(0, 0);
+        lcd.print("Lat: ");
+        lcd.print(gps.location.lat(), 6);
+        lcd.setCursor(0, 1);
+        lcd.print("Lon: ");
+        lcd.print(gps.location.lng(), 6);
+      }
+    }
+  }
+
+  // Health Monitoring
+  float humidity = dht.readHumidity();
+  float temperature = dht.readTemperature();
+  int heartRate = pulseSensor.getBeatsPerMinute();
+
+  lcd.setCursor(0, 0);
+  lcd.print("Temp: ");
+  lcd.print(temperature);
+  lcd.print("C");
+  lcd.setCursor(0, 1);
+  lcd.print("Humidity: ");
+  lcd.print(humidity);
+  lcd.print("%");
+
+  // Audio Recording (Example)
+  if (heartRate > 0 && heartRate < 100) {
+    isd1820.play(0);
+    delay(5000);  // Record for 5 seconds
+    isd1820.stop();
+  }
+
+  // Sending SMS with GPS and Health Data
+  if (millis() % 30000 == 0) {  // Send SMS every 30 seconds
+    String message = "Lat: " + String(gps.location.lat(), 6) + "\nLon: " + String(gps.location.lng(), 6) +
+                     "\nTemp: " + String(temperature) + "C\nHumidity: " + String(humidity) + "%";
+    sendSMS("+9133204629", message);  // Change the phone number as needed
+  }
+
+  // RS232 Communication with SIM A7670C Module
+  if (gsmSerial.available()) {
+    char data = gsmSerial.read();
+    Serial.write(data);  // Forward data received from GSM module to serial monitor
+  }
+  if (Serial.available()) {
+    char data = Serial.read();
+    gsmSerial.write(data);  // Forward data received from serial monitor to GSM module
+  }
+
+  delay(1000);  // Update readings every second
+}
+
+void sendSMS(String number, String message) {
+  gsmSerial.println("AT+CMGF=1");  // Set SMS mode to text
+  delay(1000);
+  gsmSerial.println("AT+CMGS=\"" + number + "\"");  // Send SMS command with the phone number
+  delay(1000);
+  gsmSerial.println(message);  // Send the message
+  delay(100);
+  gsmSerial.write(26);  // End the SMS with Ctrl+Z (ASCII code 26)
+  delay(1000);
+}
